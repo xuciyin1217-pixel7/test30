@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>無縫背景圖測試 (Seamless Pattern)</title>
+    <style>
+        :root {
+            --primary-color: #4a90e2;
+            --background-color: #f8f9fa;
+        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #e9ecef; color: #333; max-width: 1000px; margin: 0 auto; padding: 20px; }
+        .container { background: #fff; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        h2 { border-left: 5px solid var(--primary-color); padding-left: 15px; color: #2c3e50; margin-top: 0; }
+        
+        /* 控制面板排版 */
+        .controls { background: var(--background-color); padding: 15px; border-radius: 8px; margin-bottom: 15px; display: flex; gap: 15px; flex-wrap: wrap; align-items: center; }
+        .control-group { display: flex; flex-direction: column; gap: 5px; }
+        
+        button { background: var(--primary-color); color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; transition: background 0.2s; white-space: nowrap; }
+        button:hover { background: #357abd; }
+        button.btn-danger { background: #e74c3c; }
+        button.btn-danger:hover { background: #c0392b; }
+        button.btn-secondary { background: #95a5a6; }
+        button.btn-secondary:hover { background: #7f8c8d; }
+
+        input[type="file"] { border: 1px solid #ccc; padding: 5px; border-radius: 5px; background: #fff; }
+        input[type="number"] { width: 60px; padding: 5px; border: 1px solid #ccc; border-radius: 4px; text-align: center; }
+
+        /* 圖片列表管理區域 */
+        .image-list-container { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 10px; margin-bottom: 15px; max-height: 250px; overflow-y: auto; }
+        .empty-text { color: #888; text-align: center; font-size: 0.9em; margin: 10px 0; }
+        .image-item { display: flex; align-items: center; justify-content: space-between; background: var(--background-color); padding: 10px; border-radius: 6px; margin-bottom: 8px; }
+        .image-item:last-child { margin-bottom: 0; }
+        .image-item-left { display: flex; align-items: center; gap: 15px; }
+        .image-item img { width: 50px; height: 50px; object-fit: cover; border-radius: 4px; border: 1px solid #ccc; }
+        
+        /* 預覽區 */
+        #pattern-preview { 
+            width: 100%; 
+            height: 500px; 
+            border: 2px dashed #aaa; 
+            border-radius: 8px; 
+            background-color: #eee; 
+            transition: background-size 0.1s ease-out; 
+            /* 讓背景預設為重複顯示 */
+            background-repeat: repeat; 
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>無縫背景圖測試 (Seamless Pattern)</h2>
+        <p>上傳多張照片，設定拼接的網格尺寸與彼此的出現比例，系統將為您自動生成一塊「拼貼磁磚」，並無縫重複鋪滿於畫面中。您還可以自由縮放背景尺寸以檢視實際效果。</p>
+        
+        <!-- 整體參數控制區 -->
+        <div class="controls">
+            <div class="control-group">
+                <label>1. 上傳圖片：</label>
+                <input type="file" id="pattern-files" accept="image/*" multiple>
+            </div>
+            
+            <div class="control-group">
+                <label>磁磚網格 (NxN)：<span id="grid-size-val">2</span></label>
+                <input type="range" id="grid-size" min="1" max="6" value="2">
+            </div>
+
+            <div class="control-group">
+                <label>背景顯示縮放 (Scale)：<span id="scale-val">300</span>px</label>
+                <input type="range" id="pattern-scale" min="10" max="1000" value="300">
+            </div>
+
+            <div style="margin-left: auto;">
+                <button id="btn-shuffle" class="btn-secondary">🎲 重新洗牌</button>
+            </div>
+        </div>
+
+        <!-- 已上傳的圖片清單與比例管理 -->
+        <div class="image-list-container" id="image-list">
+            <div class="empty-text">尚無圖片，請從上方上傳</div>
+        </div>
+
+        <!-- 即時預覽畫布 -->
+        <div id="pattern-preview"></div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('pattern-files');
+        const gridInput = document.getElementById('grid-size');
+        const scaleInput = document.getElementById('pattern-scale');
+        const previewBox = document.getElementById('pattern-preview');
+        const imageListContainer = document.getElementById('image-list');
+        const btnShuffle = document.getElementById('btn-shuffle');
+        
+        let uploadedImages = []; // 存放所有上傳的圖片與參數
+
+        /* ============================
+           1. 檔案上傳與列表管理
+           ============================ */
+        fileInput.addEventListener('change', function(e) {
+            const files = Array.from(e.target.files);
+            if (!files.length) return;
+
+            files.forEach(file => {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        // 每張圖片賦予唯一 ID 與預設權重(比例) 1
+                        uploadedImages.push({
+                            id: Date.now() + Math.random().toString(36).substr(2, 5),
+                            imgElement: img,
+                            weight: 1
+                        });
+                        renderImageList();
+                        generatePattern();
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+            // 清空 input 讓下次同檔名也能觸發
+            this.value = '';
+        });
+
+        // 渲染圖片管理清單
+        function renderImageList() {
+            if (uploadedImages.length === 0) {
+                imageListContainer.innerHTML = '<div class="empty-text">尚無圖片，請從上方上傳</div>';
+                return;
+            }
+
+            imageListContainer.innerHTML = '';
+            uploadedImages.forEach((item, index) => {
+                const row = document.createElement('div');
+                row.className = 'image-item';
+
+                // 縮圖與檔名
+                const leftDiv = document.createElement('div');
+                leftDiv.className = 'image-item-left';
+                const thumb = document.createElement('img');
+                thumb.src = item.imgElement.src;
+                leftDiv.appendChild(thumb);
+                
+                const label = document.createElement('span');
+                label.textContent = `圖片 ${index + 1}`;
+                leftDiv.appendChild(label);
+                
+                // 權重控制與刪除按鈕
+                const rightDiv = document.createElement('div');
+                
+                const weightLabel = document.createElement('label');
+                weightLabel.innerHTML = '出現比例：';
+                const weightInput = document.createElement('input');
+                weightInput.type = 'number';
+                weightInput.min = '0';
+                weightInput.value = item.weight;
+                weightInput.addEventListener('input', (e) => {
+                    item.weight = parseFloat(e.target.value) || 0;
+                    generatePattern();
+                });
+                weightLabel.appendChild(weightInput);
+
+                const delBtn = document.createElement('button');
+                delBtn.textContent = '刪除';
+                delBtn.className = 'btn-danger';
+                delBtn.style.marginLeft = '15px';
+                delBtn.addEventListener('click', () => {
+                    uploadedImages = uploadedImages.filter(img => img.id !== item.id);
+                    renderImageList();
+                    generatePattern();
+                });
+
+                rightDiv.appendChild(weightLabel);
+                rightDiv.appendChild(delBtn);
+
+                row.appendChild(leftDiv);
+                row.appendChild(rightDiv);
+                imageListContainer.appendChild(row);
+            });
+        }
+
+        /* ============================
+           2. 核心：產生無縫拼貼磁磚 (Canvas)
+           ============================ */
+        function generatePattern() {
+            // 如果沒有圖片或總權重為 0，則清空背景
+            const totalWeight = uploadedImages.reduce((sum, item) => sum + item.weight, 0);
+            if (uploadedImages.length === 0 || totalWeight <= 0) {
+                previewBox.style.backgroundImage = 'none';
+                return;
+            }
+
+            const gridSize = parseInt(gridInput.value); // N * N 網格
+            const cellSize = 200; // 在 Canvas 裡每格的高解析度基準 (數字越大越清晰但稍吃效能)
+            const canvasSize = gridSize * cellSize;
+
+            // 建立暫存 Canvas 繪製這塊「磁磚」
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = canvasSize;
+            tempCanvas.height = canvasSize;
+            const ctx = tempCanvas.getContext('2d');
+
+            // 依序填滿 NxN 網格
+            for (let row = 0; row < gridSize; row++) {
+                for (let col = 0; col < gridSize; col++) {
+                    // 根據比例隨機選取一張圖片
+                    const selectedImg = getRandomImageByWeight(totalWeight);
+                    if (selectedImg) {
+                        const x = col * cellSize;
+                        const y = row * cellSize;
+                        // 以 Object-fit: cover 的方式畫入該方格，確保填滿不變形
+                        drawImageCover(ctx, selectedImg, x, y, cellSize, cellSize);
+                    }
+                }
+            }
+
+            // 將 Canvas 輸出為 Base64 並設為背景圖
+            const dataURL = tempCanvas.toDataURL('image/jpeg', 0.9);
+            previewBox.style.backgroundImage = `url(${dataURL})`;
+            
+            // 更新畫面縮放
+            updatePatternScale();
+        }
+
+        // 輪盤法 (Roulette Wheel) 隨機選圖 (權重越高，被選到的機率越大)
+        function getRandomImageByWeight(totalWeight) {
+            let random = Math.random() * totalWeight;
+            let current = 0;
+            for (let item of uploadedImages) {
+                current += item.weight;
+                if (random <= current) return item.imgElement;
+            }
+            return uploadedImages[uploadedImages.length - 1].imgElement;
+        }
+
+        // 類似 CSS background-size: cover 的 Canvas 繪製輔助函數
+        function drawImageCover(ctx, img, x, y, w, h) {
+            const imgRatio = img.width / img.height;
+            const targetRatio = w / h;
+            let drawW, drawH, drawX, drawY;
+
+            // 圖片比較寬，以高為基準裁切寬度
+            if (imgRatio > targetRatio) {
+                drawH = h;
+                drawW = img.width * (h / img.height);
+                drawX = x - (drawW - w) / 2;
+                drawY = y;
+            } 
+            // 圖片比較高，以寬為基準裁切高度
+            else {
+                drawW = w;
+                drawH = img.height * (w / img.width);
+                drawX = x;
+                drawY = y - (drawH - h) / 2;
+            }
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(x, y, w, h);
+            ctx.clip(); // 限制繪製範圍在此方格內
+            ctx.drawImage(img, drawX, drawY, drawW, drawH);
+            ctx.restore();
+        }
+
+        /* ============================
+           3. UI 互動與參數連動
+           ============================ */
+        function updatePatternScale() {
+            const scale = scaleInput.value;
+            previewBox.style.backgroundSize = `${scale}px`;
+            document.getElementById('scale-val').textContent = scale;
+        }
+
+        scaleInput.addEventListener('input', updatePatternScale);
+
+        gridInput.addEventListener('input', (e) => {
+            document.getElementById('grid-size-val').textContent = e.target.value;
+            generatePattern(); // 網格改變需要重新渲染磁磚
+        });
+
+        // 點擊重新洗牌
+        btnShuffle.addEventListener('click', generatePattern);
+
+        // 初始狀態
+        updatePatternScale();
+    </script>
+</body>
+</html>
